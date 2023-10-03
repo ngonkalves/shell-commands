@@ -30,9 +30,19 @@ initialize_service() {
     read_variables "$@"
 
     cat <<EOF
+#############################################################################
+# As systemd system service
+#############################################################################
 # Save systemd service unit file to /etc/systemd/system/$script_name.service
 # Enable service: $ sudo systemctl enable $script_name.service
 # Start service:  $ sudo systemctl start $script_name.service
+#############################################################################
+# As systemd user service
+#############################################################################
+# Save systemd service unit file to ~/.config/systemd/user/$script_name.service
+# Enable service: $ systemctl --user enable $script_name.service
+# Start service:  $ systemctl --user start $script_name.service
+#############################################################################
 [Unit]
 Description=Service will watch for file creations and will react upon with a debounce time of $delay
 After=network.target
