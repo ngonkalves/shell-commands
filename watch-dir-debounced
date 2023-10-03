@@ -38,7 +38,7 @@ Description=Service will watch for file creations and will react upon with a deb
 After=network.target
 
 [Service]
-ExecStart=$script_path monitor $delay $directory_to_monitor $command
+ExecStart=$script_path monitor $delay "$input_paths" $command
 Restart=always
 RestartSec=3
 ExecStop=$(which pgrep) -f $script_name | $(which xargs) $(which kill) -TERM 
@@ -69,8 +69,33 @@ read_variables() {
     # delay from input (first argument)
     delay=$2
 
-    # Set the directory to monitor (second argument)
-    directory_to_monitor="$3"
+    # Set directories to monitor (second argument)
+    input_paths="$3"
+
+    # keep initial IFS value
+    OIFS=$IFS
+    
+    # Split the input string into an array using comma as the delimiter
+    IFS=',' read -ra paths_array <<< "$input_paths"
+    
+    # Initialize an empty string variable
+    directories_to_monitor=""
+    
+    # Loop through the array and surround each path with double quotes
+    for path in "${paths_array[@]}"; do
+        # validate path exists
+        if [ ! -d "$path" ]; then
+            log "Folder $path does not exit, exiting..."
+            exit 3
+        fi
+        directories_to_monitor+="$path "
+    done
+    
+    # Remove the trailing space, if any
+    directories_to_monitor="${directories_to_monitor%" "}"
+
+    # restore IFS initial value
+    IFS=$OIFS
 
     # Command to execute will be read from script arguments, from third on
     shift 3
@@ -81,12 +106,6 @@ read_variables() {
     # half of the delay will be used before scheduling the task and the over half in the task itself while waiting for other events to occur, reducing the amount of received events
     half_delay=$(($delay/2))
     scheduled_action_pid=0
-
-    # validate
-    if [ ! -d "$directory_to_monitor" ]; then
-        log "Folder $directory_to_monitor does not exit, exiting..."
-        exit 3
-    fi
 }
 
 # Function to log messages with timestamps
@@ -95,7 +114,7 @@ log() {
 }
 
 help() {
-    echo "Usage: $0 [service|monitor] DEBOUNCE_TIME_IN_SECONDS /path/to/watch COMMAND_TO_EXECUTE [ARG1 ...]"
+    echo "Usage: $0 [service|monitor] DEBOUNCE_TIME_IN_SECONDS /path/to/watch1,/path/to/watch2,/path/to/watch3 COMMAND_TO_EXECUTE [ARG1 ...]"
 }
 
 # Function to execute your desired action
@@ -124,7 +143,7 @@ initialize "$@"
 
 while true; do
     # Use inotifywait to listen for file creation events
-    file_event=$(inotifywait --recursive $MONITOR_EVENT_TYPES "$directory_to_monitor")
+    file_event=$(inotifywait --recursive $MONITOR_EVENT_TYPES $directories_to_monitor)
 
     log "Event received: $file_event"
 
