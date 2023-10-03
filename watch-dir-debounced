@@ -1,0 +1,142 @@
+#!/bin/bash
+
+# Requires inotify-tools to be installed
+# sudo apt-get install inotify-tools
+
+MONITOR_EVENT_TYPES="--event create --event modify --event close_write --event moved_to"
+script_path=$(realpath $0)
+script_name=$(basename "$0")
+
+# Function that will serve as entry point to several types of executions
+initialize() {
+    # empty string when $1 not defined
+    case ${1-} in
+    service)
+        initialize_service "$@"
+        exit 0
+    ;;
+    monitor)
+        initialize_monitor "$@"
+    ;;
+    *)
+        help
+        exit 1
+    ;;
+    esac
+}
+
+# Function to generate systemd service unit file
+initialize_service() {
+    read_variables "$@"
+
+    cat <<EOF
+# Save systemd service unit file to /etc/systemd/system/$script_name.service
+# Enable service: $ sudo systemctl enable $script_name.service
+# Start service:  $ sudo systemctl start $script_name.service
+[Unit]
+Description=Service will watch for file creations and will react upon with a debounce time of $delay
+After=network.target
+
+[Service]
+ExecStart=$script_path monitor $delay $directory_to_monitor $command
+Restart=always
+RestartSec=3
+ExecStop=$(which pgrep) -f $script_name | $(which xargs) $(which kill) -TERM 
+
+[Install]
+WantedBy=default.target
+EOF
+}
+
+# Function to initialize variables and handle command-line arguments
+initialize_monitor() {
+    # Check if inotifywait is installed
+    if [ "$(type inotifywait > /dev/null 2>&1 ; echo $?)" -ne "0" ]; then
+        echo "Command inotifywait is not installed, use the following command to install it: sudo apt-get install inotify-tools" 
+        exit 1
+    fi
+
+    read_variables "$@"
+}
+
+read_variables() {
+    # Check if at least two arguments were provided
+    if [ $# -lt 4 ]; then
+        help
+        exit 2
+    fi
+
+    # delay from input (first argument)
+    delay=$2
+
+    # Set the directory to monitor (second argument)
+    directory_to_monitor="$3"
+
+    # Command to execute will be read from script arguments, from third on
+    shift 3
+    command="$@"
+    
+ 
+    # Initialize other variables
+    # half of the delay will be used before scheduling the task and the over half in the task itself while waiting for other events to occur, reducing the amount of received events
+    half_delay=$(($delay/2))
+    scheduled_action_pid=0
+
+    # validate
+    if [ ! -d "$directory_to_monitor" ]; then
+        log "Folder $directory_to_monitor does not exit, exiting..."
+        exit 3
+    fi
+}
+
+# Function to log messages with timestamps
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
+
+help() {
+    echo "Usage: $0 [service|monitor] DEBOUNCE_TIME_IN_SECONDS /path/to/watch COMMAND_TO_EXECUTE [ARG1 ...]"
+}
+
+# Function to execute your desired action
+perform_action() {
+    log "Performing action after $delay seconds of inactivity"
+    # Add your action here (e.g., move, copy, process the file, etc.)
+    eval "$command"
+}
+
+# Function to cancel the scheduled action
+cancel_scheduled_action() {
+    if [ "$scheduled_action_pid" -ne 0 ]; then
+        #echo "Script: $script_name"
+        if pgrep -f "$script_name" | grep -q "$scheduled_action_pid" > /dev/null; then
+            log "Canceling scheduled action with PID: $scheduled_action_pid"
+            kill "$scheduled_action_pid"
+            scheduled_action_pid=0
+        else
+            log "No process found for PID: $scheduled_action_pid"
+        fi
+    fi
+}
+
+# Main script
+initialize "$@"
+
+while true; do
+    # Use inotifywait to listen for file creation events
+    file_event=$(inotifywait --recursive $MONITOR_EVENT_TYPES "$directory_to_monitor")
+
+    log "Event received: $file_event"
+
+    # If a new event is received, cancel the scheduled action (if any)
+    cancel_scheduled_action
+
+    # Sleep to avoid reacting too soon to the event
+    sleep "$half_delay"
+
+    # Schedule a new action to run after 1 minute
+    (sleep "$half_delay" && perform_action) &
+    scheduled_action_pid=$!
+    log "Scheduled action with PID: $scheduled_action_pid"
+done
+
