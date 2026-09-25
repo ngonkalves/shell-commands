@@ -109,8 +109,11 @@ RUN npm install --global "npm@${NPM_VERSION}" "@angular/cli@${ANGULAR_CLI_VERSIO
     ng version
 
 # Add a startup hook without introducing a second file dependency.
-RUN mkdir -p /entrypoint-scripts && \
+RUN mkdir -p $ENTRYPOINTD && \
     install -o coder -g coder -m 0600 /dev/null /.password && \
+    ########################################################
+    # Script reset-password.sh
+    ########################################################
     printf '%s\n' \
     '#!/bin/sh' \
     'set -eu' \
@@ -147,8 +150,36 @@ RUN mkdir -p /entrypoint-scripts && \
     'fi' \
     '' \
     'printf "\\n\\n\\nURL: http://%s:%s\\nPASSWORD: %s\\n\\n\\n%s\\n\\n\\n" "${PUBLIC_IP}" "${PORT:-8888}" "${PASSWORD}" "${IP_INFO}"' \
-    > /entrypoint-scripts/reset-password.sh && \
-    chmod 0755 /entrypoint-scripts/reset-password.sh
+    > $ENTRYPOINTD/reset-password.sh && \
+    chmod 0755 $ENTRYPOINTD/reset-password.sh && \
+    ########################################################
+    # Script setup-code-server.sh
+    ########################################################
+    printf '%s\n' \
+    '#!/bin/sh' \
+    'set -eu' \
+    '' \
+    'code-server --force --install-extension vscjava.vscode-java-pack' \
+    'code-server --force --install-extension VMware.vscode-boot-dev-pack' \
+    '' \
+    'SETTINGS_DIRECTORY="${HOME:-/home/coder}/.local/share/code-server/User"' \
+    'SETTINGS_FILE="${SETTINGS_DIRECTORY}/settings.json"' \
+    'SETTINGS_TEMP="${SETTINGS_FILE}.$$"' \
+    'mkdir -p "${SETTINGS_DIRECTORY}"' \
+    'if [ ! -f "${SETTINGS_FILE}" ]; then' \
+    '    printf "{}\\n" > "${SETTINGS_FILE}"' \
+    'fi' \
+    'jq '\''. + {' \
+    '    "keyboard.layout": "00000816",' \
+    '    "spring.initializr.defaultLanguage": "Java",' \
+    '    "git.openRepositoryInParentFolders": "never",' \
+    '    "testing.automaticallyOpenTestResults": "neverOpen",' \
+    '    "remote.autoForwardPortsSource": "hybrid",' \
+    '    "workbench.colorTheme": "Visual Studio Dark"' \
+    '}'\'' "${SETTINGS_FILE}" > "${SETTINGS_TEMP}"' \
+    'mv -f "${SETTINGS_TEMP}" "${SETTINGS_FILE}"' \
+    > $ENTRYPOINTD/setup-code-server.sh && \
+    chmod 0755 $ENTRYPOINTD/setup-code-server.sh
 
 # Create workspace
 RUN mkdir -p /workspace && chown -R coder:coder /workspace
@@ -157,27 +188,6 @@ RUN mkdir -p /workspace && chown -R coder:coder /workspace
 USER coder
 
 WORKDIR /workspace
-
-# Install java extensions and spring boot extensions
-RUN code-server --force --install-extension vscjava.vscode-java-pack && \
-    code-server --force --install-extension VMware.vscode-boot-dev-pack
-
-# Merge defaults into the code-server settings.json via jq
-# (keyboard layout + color theme), falling back to '{}' if absent
-RUN mkdir -p ~/.local/share/code-server/User && \
-    if [ -f ~/.local/share/code-server/User/settings.json ]; then \
-        jq -e . ~/.local/share/code-server/User/settings.json; \
-    else \
-        printf '{}\n'; \
-    fi | jq \
-    '."keyboard.layout" = "00000816" | \
-     ."spring.initializr.defaultLanguage" = "Java" | \
-     ."git.openRepositoryInParentFolders" = "never" | \
-     ."testing.automaticallyOpenTestResults" = "neverOpen" | \
-     ."remote.autoForwardPortsSource" = "hybrid" | \
-     ."workbench.colorTheme" = "Visual Studio Dark" ' \
-     > ~/.local/share/code-server/User/settings.json.tmp && \
-    mv -f ~/.local/share/code-server/User/settings.json.tmp ~/.local/share/code-server/User/settings.json
 CONTAINERFILE
 
 # Remove any existing container with the same name
@@ -190,4 +200,12 @@ if [[ "$RUN_MODE" == "detached" ]]; then
   RUN_OPTIONS+=(--detach)
 fi
 
-docker run "${RUN_OPTIONS[@]}" "$LOCAL_IMAGE_NAME"
+mkdir -p ~/workspace || true
+mkdir -p ~/.local/share/code-server || true
+mkdir -p ~/.config/code-server || true
+
+docker run "${RUN_OPTIONS[@]}" \
+    -v ~/workspace:/workspace \
+    -v ~/.local/share/code-server:/home/coder/.local/share/code-server \
+    -v ~/.config/code-server:/home/coder/.config/code-server \
+    "$LOCAL_IMAGE_NAME"
