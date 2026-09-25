@@ -6,6 +6,24 @@ APP_NAME="code-server"
 IMAGE_NAME="${APP_NAME}:latest"
 LOCAL_IMAGE_NAME="localhost/${IMAGE_NAME}"
 
+RUN_MODE="detached"
+case "${1:-}" in
+  ""|--detach)
+    ;;
+  --foreground)
+    RUN_MODE="foreground"
+    ;;
+  *)
+    printf 'Usage: %s [--detach|--foreground]\n' "$0" >&2
+    exit 2
+    ;;
+esac
+
+if (( $# > 1 )); then
+  printf 'Usage: %s [--detach|--foreground]\n' "$0" >&2
+  exit 2
+fi
+
 # Build the Docker image directly from the complete embedded Dockerfile.
 # This is intentionally a second, synchronized single-file implementation.
 docker build -t "$LOCAL_IMAGE_NAME" -f - . << 'CONTAINERFILE'
@@ -166,6 +184,10 @@ CONTAINERFILE
 docker rm -f "$APP_NAME" 2>/dev/null || true
 
 # Host networking is intentional: development applications may expose ports.
-docker run --rm --detach --name "$APP_NAME" \
-  --network=host \
-  "$LOCAL_IMAGE_NAME"
+RUN_OPTIONS=(--rm --name "$APP_NAME" --network=host)
+
+if [[ "$RUN_MODE" == "detached" ]]; then
+  RUN_OPTIONS+=(--detach)
+fi
+
+docker run "${RUN_OPTIONS[@]}" "$LOCAL_IMAGE_NAME"
