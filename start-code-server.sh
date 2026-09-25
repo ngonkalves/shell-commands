@@ -43,7 +43,8 @@ ARG GITHUB_FOLDER_VERSION=${JDK_VERSION//_/+}
 # Listen on port 8888 instead of code-server's default 8080
 ENV PORT=8888 \
     CS_DISABLE_FILE_DOWNLOADS=true \
-    ENTRYPOINTD=/entrypoint-scripts
+    ENTRYPOINTD=/entrypoint-scripts \
+    USER_HOME=/home/coder
 
 # Install build tools and utilities
 RUN apt-get update && \
@@ -183,9 +184,12 @@ RUN mkdir -p $ENTRYPOINTD && \
     chmod 0755 $ENTRYPOINTD/setup-code-server.sh
 
 # Create workspace and required configuration folders
-RUN mkdir -p /workspace && chown -R coder:coder /workspace && \
-    mkdir -p /home/coder/.config && chown -R coder:coder /home/coder/.config && \
-    mkdir -p /home/coder/.local/share && chown -R coder:coder /home/coder/.local
+RUN mkdir -p /workspace && \
+    mkdir -p $USER_HOME/.config/code-server && \
+    mkdir -p $USER_HOME/.local/share/code-server && \
+    mkdir -p $USER_HOME/.gradle && \
+    mkdir -p $USER_HOME/.m2/repository && \
+    chown -R coder:coder $USER_HOME /workspace
 
 # Switch back to non-root user
 USER coder
@@ -206,10 +210,16 @@ fi
 mkdir -p ~/workspace
 mkdir -p ~/.config/code-server
 mkdir -p ~/.local/share/code-server
+mkdir -p ~/.gradle
+mkdir -p ~/.m2/repository
+
+USER_HOME=/home/coder
 
 docker run "${RUN_OPTIONS[@]}" \
     --user "$(id -u):$(id -g)" \
     -v ~/workspace:/workspace:Z \
-    -v ~/.local/share/code-server:/home/coder/.local/share/code-server:Z \
-    -v ~/.config/code-server:/home/coder/.config/code-server:Z \
+    -v ~/.local/share/code-server:$USER_HOME/.local/share/code-server:Z \
+    -v ~/.config/code-server:$USER_HOME/.config/code-server:Z \
+    -v ~/.gradle:$USER_HOME/.gradle:Z \
+    -v ~/.m2:$USER_HOME/.m2:Z \
     "$LOCAL_IMAGE_NAME"
