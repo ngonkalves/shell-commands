@@ -161,6 +161,7 @@ RUN mkdir -p $ENTRYPOINTD && \
     '' \
     'code-server --force --install-extension vscjava.vscode-java-pack' \
     'code-server --force --install-extension VMware.vscode-boot-dev-pack' \
+    'code-server --force --install-extension yutengjing.vscode-archive' \
     '' \
     'SETTINGS_DIRECTORY="${HOME:-/home/coder}/.local/share/code-server/User"' \
     'SETTINGS_FILE="${SETTINGS_DIRECTORY}/settings.json"' \
@@ -181,8 +182,10 @@ RUN mkdir -p $ENTRYPOINTD && \
     > $ENTRYPOINTD/setup-code-server.sh && \
     chmod 0755 $ENTRYPOINTD/setup-code-server.sh
 
-# Create workspace
-RUN mkdir -p /workspace && chown -R coder:coder /workspace
+# Create workspace and required configuration folders
+RUN mkdir -p /workspace && chown -R coder:coder /workspace && \
+    mkdir -p /home/coder/.config && chown -R coder:coder /home/coder/.config && \
+    mkdir -p /home/coder/.local/share && chown -R coder:coder /home/coder/.local
 
 # Switch back to non-root user
 USER coder
@@ -200,12 +203,13 @@ if [[ "$RUN_MODE" == "detached" ]]; then
   RUN_OPTIONS+=(--detach)
 fi
 
-mkdir -p ~/workspace || true
-mkdir -p ~/.local/share/code-server || true
-mkdir -p ~/.config/code-server || true
+mkdir -p ~/workspace
+mkdir -p ~/.config/code-server
+mkdir -p ~/.local/share/code-server
 
 docker run "${RUN_OPTIONS[@]}" \
-    -v ~/workspace:/workspace \
-    -v ~/.local/share/code-server:/home/coder/.local/share/code-server \
-    -v ~/.config/code-server:/home/coder/.config/code-server \
+    --user "$(id -u):$(id -g)" \
+    -v ~/workspace:/workspace:Z \
+    -v ~/.local/share/code-server:/home/coder/.local/share/code-server:Z \
+    -v ~/.config/code-server:/home/coder/.config/code-server:Z \
     "$LOCAL_IMAGE_NAME"
