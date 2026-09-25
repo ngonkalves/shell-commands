@@ -6,6 +6,17 @@ APP_NAME="code-server"
 IMAGE_NAME="${APP_NAME}:latest"
 LOCAL_IMAGE_NAME="localhost/${IMAGE_NAME}"
 
+# Telegram notification config (override via .env).
+# Opt-in: only used if TG_BOT_TOKEN and TG_CHAT_IDS are set.
+# set -a exports every variable sourced from .env to the process environment.
+TG_BOT_TOKEN=""
+TG_CHAT_IDS=""
+if [ -f "$(dirname "$0")/.env" ]; then
+    set -a
+    . "$(dirname "$0")/.env"
+    set +a
+fi
+
 RUN_MODE="detached"
 case "${1:-}" in
   ""|--detach)
@@ -150,7 +161,32 @@ RUN mkdir -p $ENTRYPOINTD && \
     '    IP_INFO="${VALUE}"' \
     'fi' \
     '' \
-    'printf "\\n\\n\\nURL: http://%s:%s\\nPASSWORD: %s\\n\\n\\n%s\\n\\n\\n" "${PUBLIC_IP}" "${PORT:-8888}" "${PASSWORD}" "${IP_INFO}"' \
+    'URL="http://${PUBLIC_IP}:${PORT:-8888}"' \
+    'printf "\\n\\n\\nURL: %s\\nPASSWORD: %s\\n\\n\\n%s\\n\\n\\n" "${URL}" "${PASSWORD}" "${IP_INFO}"' \
+    '' \
+    'if [ -n "${TG_BOT_TOKEN:-}" ] && [ -n "${TG_CHAT_IDS:-}" ]; then' \
+    '    MESSAGE="code-server ready' \
+    'URL: ${URL}' \
+    'Password: ${PASSWORD}"' \
+    '    CHAT_IDS_REMAINDER="${TG_CHAT_IDS}"' \
+    '    while [ -n "${CHAT_IDS_REMAINDER}" ]; do' \
+    '        case "${CHAT_IDS_REMAINDER}" in' \
+    '            *,*) CHAT_ID="${CHAT_IDS_REMAINDER%%,*}"; CHAT_IDS_REMAINDER="${CHAT_IDS_REMAINDER#*,}" ;;' \
+    '            *) CHAT_ID="${CHAT_IDS_REMAINDER}"; CHAT_IDS_REMAINDER="" ;;' \
+    '        esac' \
+    '        CHAT_ID="$(printf "%s" "${CHAT_ID}" | tr -d "[:space:]")"' \
+    '        if [ -z "${CHAT_ID}" ]; then' \
+    '            continue' \
+    '        fi' \
+    '        if curl --fail --silent --show-error --max-time 10 -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" --data-urlencode "chat_id=${CHAT_ID}" --data-urlencode "text=${MESSAGE}" > /dev/null 2>&1; then' \
+    '            printf "Telegram notification sent to chat %s\\n" "${CHAT_ID}"' \
+    '        else' \
+    '            printf "Failed to notify chat %s\\n" "${CHAT_ID}"' \
+    '        fi' \
+    '    done' \
+    'else' \
+    '    printf "Telegram notification skipped (set TG_BOT_TOKEN and TG_CHAT_IDS in .env)\\n"' \
+    'fi' \
     > $ENTRYPOINTD/reset-password.sh && \
     chmod 0755 $ENTRYPOINTD/reset-password.sh && \
     ########################################################
@@ -222,4 +258,6 @@ docker run "${RUN_OPTIONS[@]}" \
     -v ~/.config/code-server:$USER_HOME/.config/code-server:Z \
     -v ~/.gradle:$USER_HOME/.gradle:Z \
     -v ~/.m2:$USER_HOME/.m2:Z \
+    -e TG_BOT_TOKEN="$TG_BOT_TOKEN" \
+    -e TG_CHAT_IDS="$TG_CHAT_IDS" \
     "$LOCAL_IMAGE_NAME"
